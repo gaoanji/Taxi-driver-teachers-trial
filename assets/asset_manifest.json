@@ -1,0 +1,56 @@
+{
+  "backgrounds": [
+    "bg_city_day.jpg",
+    "bg_city_night.jpg",
+    "bg_countryside.jpg",
+    "bg_mountain.jpg",
+    "bg_residential.jpg",
+    "bg_seaside.jpg",
+    "bg_start_cover.jpg"
+  ],
+  "roads": [
+    "road_fork.png",
+    "road_straight.png"
+  ],
+  "vehicles": [
+    "taxi_back.png"
+  ],
+  "obstacles": [
+    "obstacle_barricade.png",
+    "obstacle_cat.png",
+    "obstacle_cone.png",
+    "obstacle_rock.png",
+    "obstacle_warning.png"
+  ],
+  "buttons": [
+    "btn_continue.png",
+    "btn_retry.png",
+    "btn_start.png"
+  ],
+  "ui": [
+    "ui_answer_left.png",
+    "ui_answer_right.png",
+    "ui_countdown.png",
+    "ui_level_clear.png",
+    "ui_map_pin.png",
+    "ui_progress_bar.png",
+    "ui_question_box.png",
+    "ui_trophy.png"
+  ],
+  "effects": [
+    "fx_correct.png",
+    "fx_wrong.png"
+  ],
+  "icons": [
+    "btn_help.png",
+    "btn_home.png",
+    "btn_info.png",
+    "btn_pause.png",
+    "btn_settings.png",
+    "btn_sound_off.png",
+    "btn_sound_on.png",
+    "icon_confetti.png",
+    "icon_speed.png",
+    "icon_star.png"
+  ]
+}
