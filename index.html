@@ -1,0 +1,3060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fun Reading Quiz</title>
+    <!-- 引入 MediaPipe Hands 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: "Microsoft YaHei", "Heiti SC", sans-serif;
+            background-color: #2c3e50;
+            user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* 游戏画布 */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 摄像头预览 */
+        #video-preview {
+            position: absolute;
+            bottom: max(12px, env(safe-area-inset-bottom));
+            right: max(12px, env(safe-area-inset-right));
+            width: min(160px, 25vw, 23vh);
+            height: auto;
+            aspect-ratio: 4 / 3;
+            pointer-events: none;
+            border-radius: 10px;
+            border: 3px solid #fff;
+            transform: scaleX(-1); /* 镜像翻转 */
+            z-index: 32;
+            opacity: 1;
+        }
+
+        /* UI 层 */
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 让点击穿透到画布 */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* 顶部 HUD */
+        .hud {
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            color: white;
+            font-size: 24px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            z-index: 5;
+        }
+
+        .score-board {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: 2px solid #f1c40f;
+        }
+
+        .timer-board {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: 2px solid #e74c3c;
+        }
+
+        /* 题目显示区域 */
+        #question-panel {
+            position: absolute;
+            top: 15%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            display: none; /* 默认隐藏 */
+            z-index: 20;
+            border: 4px solid #34495e;
+        }
+
+        #question-text {
+            font-size: 24px;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .options-container {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 20px;
+        }
+
+        .option-box {
+            width: 45%;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .opt-left {
+            background-color: #3498db;
+            color: white;
+            border: 3px solid #2980b9;
+        }
+
+        .opt-right {
+            background-color: #e67e22;
+            color: white;
+            border: 3px solid #d35400;
+        }
+
+        /* 确认进度条 */
+        #selection-bar-container {
+            position: absolute;
+            bottom: 25%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            height: 30px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 15px;
+            border: 2px solid white;
+            display: none;
+            overflow: hidden;
+            z-index: 20;
+        }
+
+        #selection-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #f1c40f, #2ecc71);
+            transition: width 0.1s linear;
+        }
+
+        #selection-text {
+            position: absolute;
+            bottom: 29%;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-weight: bold;
+            text-shadow: 1px 1px 3px black;
+            display: none;
+            z-index: 21;
+        }
+
+        /* 全屏覆盖层 (开始/结束/消息) */
+        .overlay-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(44, 62, 80, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            pointer-events: auto;
+            color: white;
+            text-align: center;
+            overflow-y: auto; /* 允许垂直滚动 */
+        }
+
+        /* 开始界面: 桌面左右分区，整页尽量无滚动 */
+        #start-content {
+            width: min(1320px, 96vw);
+            height: min(92vh, 860px);
+            overflow: hidden;
+            padding: 14px 18px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            justify-content: flex-start;
+        }
+
+        .start-title-block {
+            text-align: center;
+            margin-bottom: 10px;
+            flex: 0 0 auto;
+        }
+
+        .start-title-block h1 {
+            margin: 0 0 4px;
+            font-size: clamp(30px, 3vw, 48px);
+        }
+
+        .start-subtitle {
+            margin: 0;
+            max-width: none;
+            font-size: 18px;
+            line-height: 1.35;
+            color: #f8fafc;
+        }
+
+        .start-two-column {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+            gap: 22px;
+            align-items: stretch;
+        }
+
+        .rules-panel,
+        .login-column {
+            background: rgba(255,255,255,0.10);
+            border: 2px solid rgba(255,255,255,0.32);
+            border-radius: 20px;
+            padding: 18px 20px;
+            box-sizing: border-box;
+            min-height: 0;
+        }
+
+        .rules-panel {
+            text-align: left;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .rules-panel h2,
+        .login-column h2 {
+            margin: 0 0 12px;
+            color: #f1c40f;
+            font-size: 22px;
+            text-align: center;
+            line-height: 1.25;
+            flex: 0 0 auto;
+        }
+
+        .rule-list {
+            display: grid;
+            gap: 10px;
+            flex: 1 1 auto;
+            min-height: 0;
+        }
+
+        .rule-item {
+            display: grid;
+            grid-template-columns: 34px 1fr;
+            gap: 10px;
+            align-items: start;
+            padding: 8px 10px;
+            border-radius: 12px;
+            background: rgba(0,0,0,0.14);
+        }
+
+        .rule-icon {
+            font-size: 22px;
+            line-height: 1.2;
+            text-align: center;
+        }
+
+        .rule-zh {
+            font-size: 15px;
+            line-height: 1.3;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .rule-en {
+            margin-top: 2px;
+            font-size: 11px;
+            line-height: 1.3;
+            color: #dbeafe;
+            font-weight: 400;
+        }
+
+        .login-column {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .login-column .login-panel {
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            background: transparent;
+            border: 0;
+        }
+
+        .login-column .login-grid {
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
+        .login-column .login-field.full {
+            grid-column: auto;
+        }
+
+        .login-column .login-field label {
+            font-size: 16px;
+        }
+
+        .login-column .login-field input,
+        .login-column .login-field select {
+            padding: 12px 14px;
+            font-size: 17px;
+        }
+
+        .login-column #cloud-status {
+            margin-top: 12px;
+            min-height: 40px;
+            font-size: 13px;
+            line-height: 1.35;
+        }
+
+        .login-column .login-actions {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            margin-top: 4px;
+        }
+
+        .login-column .login-actions .btn {
+            width: 100%;
+            margin: 0;
+            padding: 12px 18px;
+            font-size: 18px;
+        }
+
+        @media (max-width: 980px) {
+            .overlay-screen {
+                overflow-y: auto;
+            }
+
+            #start-content {
+                width: min(760px, 94vw);
+                height: auto;
+                overflow: visible;
+                padding: 16px;
+            }
+
+            .start-two-column {
+                grid-template-columns: 1fr;
+            }
+
+            .rules-panel,
+            .login-column {
+                padding: 18px;
+            }
+
+            .rule-zh { font-size: 16px; }
+            .rule-en { font-size: 12px; }
+        }
+
+        
+
+        #start-screen {
+            justify-content: flex-start;
+            padding: 14px 0;
+            box-sizing: border-box;
+        }
+
+        .hidden { display: none !important; }
+
+        h1 { font-size: 40px; color: #f1c40f; margin-bottom: 10px; margin-top: 10px; }
+        p { font-size: 18px; max-width: 600px; line-height: 1.5; margin: 8px 0; }
+        
+        .btn {
+            padding: 15px 40px;
+            font-size: 24px;
+            background: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            margin-top: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            transition: transform 0.2s;
+            flex-shrink: 0;
+        }
+        .btn:hover { transform: scale(1.05); background: #2ecc71; }
+        .btn-red { background: #c0392b; }
+        .btn-red:hover { background: #e74c3c; }
+        .btn-yellow { background: #f39c12; }
+        .btn-yellow:hover { background: #d35400; }
+
+        /* 模拟方向盘指示器 */
+        #steering-indicator {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 120px;
+            height: 120px;
+            background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="none" stroke="white" stroke-width="5"/><path d="M50 50 L50 5" stroke="white" stroke-width="5"/></svg>') no-repeat center;
+            background-size: contain;
+            opacity: 0.7;
+            transition: transform 0.1s;
+            z-index: 15;
+        }
+
+        /* 撞击特效层 */
+        #crash-flash {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: red;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 90;
+            transition: opacity 0.1s;
+        }
+
+        .loading-spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+
+        /* 学生登录与云端进度 */
+        .login-panel {
+            width: min(520px, 92vw);
+            background: rgba(255,255,255,0.12);
+            border: 2px solid rgba(255,255,255,0.35);
+            border-radius: 18px;
+            padding: 18px;
+            margin-top: 12px;
+            box-sizing: border-box;
+        }
+        .login-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .login-field {
+            display: flex;
+            flex-direction: column;
+            text-align: left;
+            gap: 6px;
+        }
+        .login-field.full { grid-column: 1 / -1; }
+        .login-field label { font-size: 15px; font-weight: bold; color: #f8fafc; }
+        .login-field input, .login-field select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 11px 12px;
+            border-radius: 10px;
+            border: 2px solid #bdc3c7;
+            font-size: 17px;
+            font-family: inherit;
+        }
+        .login-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+        .login-actions .btn { margin: 12px 0 0; font-size: 19px; padding: 12px 24px; }
+        #cloud-status {
+            min-height: 24px;
+            margin-top: 8px;
+            color: #f9e79f;
+            font-size: 15px;
+            font-weight: bold;
+        }
+        #player-badge {
+            position: absolute;
+            top: 82px;
+            left: 20px;
+            z-index: 30;
+            background: rgba(0,0,0,.58);
+            color: white;
+            border: 2px solid #5dade2;
+            border-radius: 16px;
+            padding: 8px 14px;
+            font-size: 16px;
+            display: none;
+        }
+        #save-indicator {
+            position: absolute;
+            left: 12px;
+            bottom: 18px;
+            z-index: 35;
+            background: rgba(0,0,0,.65);
+            color: white;
+            border-radius: 14px;
+            padding: 7px 12px;
+            font-size: 14px;
+            display: none;
+        }
+        @media (max-width: 600px) {
+            .login-grid { grid-template-columns: 1fr; }
+            .login-field.full { grid-column: auto; }
+        }
+
+
+        /* 全年级排行榜 */
+        .leaderboard-panel {
+            width: min(920px, 92vw);
+            margin: 18px auto;
+            padding: 18px;
+            box-sizing: border-box;
+            background: rgba(255,255,255,0.96);
+            color: #243447;
+            border-radius: 18px;
+            border: 3px solid #f1c40f;
+            box-shadow: 0 8px 24px rgba(0,0,0,.28);
+        }
+        .leaderboard-panel h2 { margin: 0 0 12px; color: #b7791f; }
+        .leaderboard-status { margin: 8px 0 14px; font-weight: bold; }
+        .leaderboard-table-wrap { overflow-x: auto; }
+        .leaderboard-table { width: 100%; border-collapse: collapse; font-size: 16px; }
+        .leaderboard-table th, .leaderboard-table td {
+            padding: 9px 8px; border-bottom: 1px solid #d9e2ec; text-align: center; white-space: nowrap;
+        }
+        .leaderboard-table th { background: #fff3cd; color: #6b4f00; }
+        .leaderboard-table tr.current-player { background: #fff8d6; outline: 2px solid #f1c40f; }
+        .current-rank-card {
+            margin-top: 12px; padding: 12px; border-radius: 12px;
+            background: #e8f6f3; border: 2px solid #27ae60; font-weight: bold;
+        }
+        .retry-submit-btn { padding: 9px 18px; font-size: 16px; margin: 8px 0 0; }
+
+    
+/* ===== 图片美化版: 仅视觉层，不改变 Google Sheet / 排行榜 / 存档数据结构 ===== */
+#start-screen {
+    background:
+      linear-gradient(rgba(3,35,75,.42), rgba(3,35,75,.62)),
+      url("assets/backgrounds/bg_city_day.jpg") center/cover no-repeat !important;
+}
+#start-screen .start-card, #start-screen .login-card, #start-screen .instructions-card {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+#question-panel {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+}
+#question-text {
+    box-sizing: border-box;
+    min-height: 118px;
+    margin: 0;
+    padding: 27px 58px 22px 82px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: url("assets/ui/ui_question_box.png") center/100% 100% no-repeat;
+    color: #17375e;
+    text-shadow: none;
+}
+#question-panel .options-container {
+    gap: 28px;
+    margin-top: 12px;
+}
+#question-panel .option-box {
+    box-sizing: border-box;
+    width: 50%;
+    min-height: 116px;
+    padding: 24px 28px 20px 88px;
+    border: 0;
+    color: #17375e;
+    text-shadow: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,.22);
+}
+#opt-left {
+    background: url("assets/ui/ui_answer_left.png") center/100% 100% no-repeat;
+}
+#opt-right {
+    background: url("assets/ui/ui_answer_right.png") center/100% 100% no-repeat;
+}
+.feedback-card {
+    width: min(780px, 90vw);
+    box-sizing: border-box;
+    padding: 28px 34px 30px;
+    border: 4px solid #39bdf5;
+    border-radius: 28px;
+    background: linear-gradient(180deg, rgba(8,54,105,.97), rgba(3,28,70,.97));
+    box-shadow: 0 20px 55px rgba(0,0,0,.48), inset 0 0 0 2px rgba(255,255,255,.18);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+#feedback-banner {
+    width: min(520px, 76vw);
+    height: auto;
+    margin-bottom: 2px;
+}
+#message-screen #msg-title {
+    color: #fff !important;
+    font-size: clamp(28px, 3vw, 42px);
+    margin: 2px 0 8px;
+}
+#message-screen #msg-desc {
+    color: #eef8ff !important;
+    margin: 6px 0;
+}
+#message-screen #passenger-dialogue {
+    box-sizing: border-box;
+    width: min(650px, 82vw);
+    max-width: none !important;
+    color: #17375e !important;
+    background: #fff9e7 !important;
+    border: 3px solid #ffc338 !important;
+    border-left-width: 3px !important;
+    border-radius: 18px !important;
+}
+.image-action-btn {
+    width: min(390px, 68vw);
+    height: 98px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background-color: transparent !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    background-size: contain !important;
+    color: transparent !important;
+    box-shadow: none;
+}
+.image-action-btn.continue-art,
+.image-action-btn.retry-art {
+    background-image: none !important;
+}
+#end-screen {
+    background: linear-gradient(180deg, rgba(4,39,84,.96), rgba(2,18,48,.98));
+    justify-content: flex-start;
+    overflow-y: auto;
+}
+.end-content {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    padding: 18px 0 28px;
+}
+.end-finish-banner {
+    width: min(620px, 78vw);
+    min-height: 150px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 150px 36px;
+    background: url("assets/ui/ui_level_clear.png") center/100% 100% no-repeat;
+    color: white;
+    font-size: clamp(27px, 3vw, 42px);
+    font-weight: 900;
+    text-shadow: 0 3px 5px rgba(0,0,0,.4);
+}
+.end-summary {
+    width: min(900px, 90vw);
+    padding: 14px 22px;
+    box-sizing: border-box;
+    border-radius: 18px;
+    background: rgba(255,255,255,.10);
+    border: 1px solid rgba(255,255,255,.22);
+}
+.end-trophy {
+    width: 118px;
+    height: 118px;
+    object-fit: contain;
+    margin: 4px 0 -18px;
+    filter: drop-shadow(0 8px 10px rgba(0,0,0,.35));
+}
+.leaderboard-panel {
+    background: linear-gradient(180deg, rgba(247,252,255,.98), rgba(229,244,255,.98));
+    border: 4px solid #ffc338;
+    border-radius: 26px;
+    box-shadow: 0 16px 40px rgba(0,0,0,.4), inset 0 0 0 3px #159ee9;
+    padding: 26px 24px 22px;
+}
+.leaderboard-title {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: #075ca9 !important;
+    font-size: 30px;
+}
+.leaderboard-title img {
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+}
+.leaderboard-table {
+    overflow: hidden;
+    border-radius: 14px;
+    border: 2px solid #8fd8fb;
+}
+.leaderboard-table th {
+    background: linear-gradient(180deg, #188fdf, #0766b7);
+    color: #fff;
+    border-bottom: 0;
+}
+.leaderboard-table td {
+    background: rgba(255,255,255,.82);
+}
+.leaderboard-table tr.current-player td {
+    background: #fff3ba;
+    font-weight: 800;
+}
+.current-rank-card {
+    color: #074f8d;
+    background: #e3f6ff;
+    border: 2px solid #24a7eb;
+}
+
+/* 独立视觉封面: 点击后才进入原有登录及说明页面 */
+#landing-screen {
+    position: absolute;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    box-sizing: border-box;
+    padding: 0 0 clamp(28px, 6vh, 64px);
+    background-color: #159ae8;
+    background-image: url("assets/landing/landing_cover.jpg");
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-position: center top;
+}
+#landing-start-btn {
+    position: absolute;
+    right: clamp(22px, 4vw, 76px);
+    bottom: clamp(24px, 5vh, 52px);
+    width: min(420px, 31vw);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    filter: drop-shadow(0 12px 16px rgba(0,0,0,.38));
+    transition: transform .18s ease, filter .18s ease;
+}
+#landing-start-btn:hover {
+    transform: scale(1.045);
+    filter: drop-shadow(0 15px 20px rgba(0,0,0,.48));
+}
+#landing-start-btn:active {
+    transform: scale(.98);
+}
+#landing-start-btn img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+@media (max-width: 760px) {
+    #landing-start-btn {
+        right: 50%;
+        transform: translateX(50%);
+        width: min(390px, 72vw);
+    }
+    #landing-start-btn:hover {
+        transform: translateX(50%) scale(1.045);
+    }
+    #landing-start-btn:active {
+        transform: translateX(50%) scale(.98);
+    }
+}
+
+/* ===== 稳定比例的专业UI: 不再拉伸带圆形标记的图片 ===== */
+#question-panel {
+    top: 14%;
+    width: min(1180px, calc(100vw - 44px));
+}
+#question-text {
+    position: relative;
+    min-height: 92px;
+    padding: 20px 34px 20px 82px;
+    border: 2px solid rgba(80,185,238,.95);
+    border-left: 8px solid #f7b928;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(236,247,255,.98));
+    box-shadow: 0 12px 30px rgba(0,29,67,.30);
+    color: #12345b;
+    font-size: clamp(19px, 1.55vw, 25px);
+    line-height: 1.42;
+    overflow-wrap: anywhere;
+}
+#question-text::before {
+    content: "?";
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    width: 42px;
+    height: 42px;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: #f7b928;
+    color: #fff;
+    font-size: 28px;
+    font-weight: 900;
+    box-shadow: 0 4px 10px rgba(166,106,0,.24);
+}
+#question-panel .options-container {
+    gap: 22px;
+}
+#question-panel .option-box {
+    position: relative;
+    min-width: 0;
+    min-height: 104px;
+    padding: 18px 24px 18px 82px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    border: 2px solid #9dcce8;
+    border-radius: 18px;
+    background: rgba(250,253,255,.98);
+    color: #17375e;
+    font-size: clamp(16px, 1.2vw, 20px);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    box-shadow: 0 10px 24px rgba(0,29,67,.24);
+}
+#question-panel .option-box::before {
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 25px;
+    font-weight: 900;
+}
+#opt-left::before {
+    content: "A";
+    background: #168bd2;
+}
+#opt-right::before {
+    content: "B";
+    background: #ef5a43;
+}
+#opt-left {
+    background: linear-gradient(135deg, rgba(247,252,255,.99), rgba(227,244,255,.99));
+}
+#opt-right {
+    background: linear-gradient(135deg, rgba(255,252,249,.99), rgba(255,238,231,.99));
+}
+#feedback-banner {
+    display: none;
+}
+.feedback-card {
+    position: relative;
+    width: min(680px, 90vw);
+    padding: 68px 38px 30px;
+    border: 1px solid #c8dcec;
+    border-top: 7px solid #168bd2;
+    border-radius: 22px;
+    background: rgba(249,252,255,.985);
+    box-shadow: 0 24px 70px rgba(0,18,48,.52);
+}
+.feedback-card::before {
+    content: "i";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 64px;
+    height: 64px;
+    transform: translate(-50%, -50%);
+    display: grid;
+    place-items: center;
+    border: 7px solid #082f62;
+    border-radius: 50%;
+    background: #168bd2;
+    color: #fff;
+    font-size: 40px;
+    font-weight: 900;
+}
+.feedback-card.status-correct {
+    border-top-color: #1aa35b;
+}
+.feedback-card.status-correct::before {
+    content: "✓";
+    background: #1aa35b;
+}
+.feedback-card.status-wrong {
+    border-top-color: #e34b42;
+}
+.feedback-card.status-wrong::before {
+    content: "×";
+    background: #e34b42;
+}
+.feedback-card.status-crash {
+    border-top-color: #f39c12;
+}
+.feedback-card.status-crash::before {
+    content: "!";
+    background: #f39c12;
+}
+#message-screen #msg-title {
+    color: #12345b !important;
+    font-size: clamp(28px, 2.6vw, 38px);
+    margin: 0 0 6px;
+}
+#message-screen #msg-desc {
+    color: #3b536c !important;
+    font-size: clamp(18px, 1.5vw, 23px) !important;
+    line-height: 1.45;
+}
+#message-screen #passenger-dialogue {
+    width: 100%;
+    margin-top: 14px !important;
+    padding: 16px 20px !important;
+    border: 1px solid #d8e4ed !important;
+    border-left: 5px solid #f4b72d !important;
+    border-radius: 12px !important;
+    background: #f7f9fb !important;
+    color: #27445f !important;
+    font-size: clamp(17px, 1.35vw, 21px) !important;
+    font-style: normal !important;
+}
+#speech-replay-btn {
+    width: max-content;
+    margin: 10px auto 0;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid #9cc9e8;
+    border-radius: 999px;
+    background: #edf7ff;
+    color: #075f9f;
+    font-size: 16px;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow: 0 3px 9px rgba(7,95,159,.12);
+    cursor: pointer;
+}
+#speech-replay-btn:hover {
+    background: #dff2ff;
+    border-color: #63b4e8;
+}
+#speech-replay-btn:active {
+    transform: translateY(1px);
+}
+#speech-replay-btn.is-speaking {
+    color: #147447;
+    border-color: #72c59b;
+    background: #eafaf1;
+}
+#speech-replay-btn:disabled {
+    color: #6e7f8c;
+    border-color: #cbd5dc;
+    background: #f1f4f6;
+    cursor: not-allowed;
+}
+#speech-replay-btn img {
+    width: 21px;
+    height: 21px;
+    object-fit: contain;
+}
+#message-screen #msg-btn.image-action-btn {
+    width: auto;
+    min-width: 230px;
+    height: auto;
+    margin: 20px 0 0;
+    padding: 13px 30px;
+    border: 1px solid rgba(255,255,255,.35);
+    border-radius: 13px;
+    appearance: none;
+    background-color: #0871bc !important;
+    background-image: linear-gradient(180deg, #1a98df 0%, #0871bc 100%) !important;
+    color: #fff !important;
+    -webkit-text-fill-color: #fff !important;
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1.25;
+    text-shadow: 0 1px 2px rgba(0,45,82,.35);
+    box-shadow: 0 8px 18px rgba(7,77,135,.28);
+    opacity: 1 !important;
+    cursor: pointer;
+}
+#message-screen #msg-btn.image-action-btn.retry-art {
+    background-color: #db7b0d !important;
+    background-image: linear-gradient(180deg, #f2a928 0%, #db7b0d 100%) !important;
+}
+#message-screen #msg-btn.image-action-btn:hover {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+}
+#message-screen #msg-btn.image-action-btn:active {
+    filter: brightness(.97);
+    transform: translateY(1px);
+}
+.end-finish-banner {
+    width: min(540px, 76vw);
+    min-height: 68px;
+    padding: 14px 30px;
+    border: 2px solid #5dc8f2;
+    border-bottom: 5px solid #ffc338;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #168fda, #0757ad);
+    font-size: clamp(27px, 2.5vw, 38px);
+    box-shadow: 0 12px 26px rgba(0,0,0,.30);
+}
+.end-content {
+    padding: 12px 0 22px;
+}
+.end-summary {
+    width: min(1040px, 91vw);
+    margin-top: 10px;
+    padding: 12px 20px;
+}
+#final-score {
+    max-width: none;
+    margin: 0;
+    font-size: clamp(15px, 1.25vw, 19px);
+    line-height: 1.5;
+}
+#end-comment {
+    margin: 6px 0 0 !important;
+    font-size: clamp(17px, 1.35vw, 20px) !important;
+    line-height: 1.45 !important;
+}
+.end-trophy {
+    width: 78px;
+    height: 78px;
+    margin: 2px 0 -10px;
+}
+.leaderboard-panel {
+    width: min(1060px, 92vw);
+    margin: 10px auto;
+    padding: 18px 20px 16px;
+    border-width: 3px;
+    border-radius: 20px;
+}
+.leaderboard-title {
+    margin: 0 0 5px !important;
+    font-size: 26px;
+}
+.leaderboard-title img {
+    width: 38px;
+    height: 38px;
+}
+.leaderboard-status {
+    margin: 4px 0 10px;
+}
+.leaderboard-table th,
+.leaderboard-table td {
+    padding: 7px 6px;
+    font-size: 15px;
+}
+.current-rank-card {
+    margin-top: 8px;
+    padding: 9px 12px;
+}
+
+#landing-screen{background-size:contain;background-position:center;background-color:#0b3861} @media(max-aspect-ratio:1/1){#landing-start-btn{right:5%;bottom:7%;width:45%;transform:none}#landing-start-btn:hover,#landing-start-btn:active{transform:none}}.rule-en{font-size:16px;color:white}#question-panel{max-height:65vh;overflow:auto}#start-screen{overflow-y:auto} </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="landing-screen">
+            <img src="assets/landing/school-logo.png" alt="Bedok Green Secondary School" style="position:absolute;top:2.5%;left:2%;width:clamp(45px,7vmin,90px);height:auto;filter:drop-shadow(0 1px 4px white);pointer-events:none">
+            <footer style="position:absolute;bottom:0;left:0;right:0;padding:3px 8px;text-align:center;color:white;background:rgba(7,30,50,.83);font:clamp(10px,1.4vmin,14px)/1.3 Arial,sans-serif;pointer-events:none">© 2026 Bedok Green Secondary School · Designed by Miss Gao Anji · For Educational Use Only</footer>
+            <button id="landing-start-btn" type="button" onclick="enterSetupScreen()" aria-label="Start game">
+                <img src="assets/landing/btn_enter_game.png" alt="开始游戏">
+            </button>
+        </div>
+        <div id="player-badge"></div>
+        <div id="save-indicator">☁ Not synced</div>
+        <!-- 摄像头流 -->
+        <video id="input_video" style="display:none"></video>
+        <canvas id="output_canvas" id="game-canvas"></canvas>
+        <canvas id="video-preview"></canvas>
+        <div id="crash-flash"></div>
+
+        <!-- UI 元素 -->
+        <div class="ui-layer">
+            <div class="hud">
+                <div class="score-board">🚖 Score: <span id="score-display">0</span></div>
+                <div class="timer-board">⏱️ Time: <span id="time-display">60</span>s</div>
+            </div>
+
+            <!-- 虚拟方向盘 (视觉反馈) -->
+            <div id="steering-indicator"></div>
+
+            <!-- 确认进度条 -->
+            <div id="selection-text">Hold to select...</div>
+            <div id="selection-bar-container">
+                <div id="selection-bar-fill"></div>
+            </div>
+        </div>
+
+        <!-- 题目面板 -->
+        <div id="question-panel">
+            <div id="question-text">Loading question...</div>
+            <div class="options-container">
+                <div class="option-box opt-left" id="opt-left">
+                    Option A<br><span id="text-left">A</span>
+                </div>
+                <div class="option-box opt-right" id="opt-right">
+                    Option B<br><span id="text-right">B</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 开始/加载 界面 -->
+        <div id="start-screen" class="overlay-screen">
+            <div id="loading-msg">
+                <h1>🚕 Reading Taxi</h1>
+                <div class="loading-spinner" style="margin: 20px auto;"></div>
+                Starting the engine… Please allow camera access for motion controls.
+            </div>
+            <div id="start-content" class="hidden">
+                <div class="start-title-block">
+                    <h1>🚕 Reading Taxi</h1>
+                    <p class="start-subtitle">Fun Reading Quiz · 12 questions · 24 points</p>
+                </div>
+
+                <div class="start-two-column">
+                    <section class="rules-panel" aria-labelledby="rules-title">
+                        <h2 id="rules-title">👋 How to Play</h2>
+                        <div class="rule-list">
+                            <div class="rule-item">
+                                <div class="rule-icon">👐</div>
+                                <div>
+                                    
+                                    <div class="rule-en">Hold the virtual steering wheel with both hands.</div>
+                                </div>
+                            </div>
+                            <div class="rule-item">
+                                <div class="rule-icon">🎯</div>
+                                <div>
+                                    
+                                    <div class="rule-en">Raise your right hand to turn left or choose the left answer.</div>
+                                </div>
+                            </div>
+                            <div class="rule-item">
+                                <div class="rule-icon">🎯</div>
+                                <div>
+                                    
+                                    <div class="rule-en">Raise your left hand to turn right or choose the right answer.</div>
+                                </div>
+                            </div>
+                            <div class="rule-item">
+                                <div class="rule-icon">⚠️</div>
+                                <div>
+                                    
+                                    <div class="rule-en">Obstacles may appear in the middle of the road. Steer in time to avoid them.</div>
+                                </div>
+                            </div>
+                            <div class="rule-item">
+                                <div class="rule-icon">⏳</div>
+                                <div>
+                                    
+                                    <div class="rule-en">Keep the steering direction for 5 seconds to confirm your answer.</div>
+                                </div>
+                            </div>
+                            <div class="rule-item">
+                                <div class="rule-icon">⭐</div>
+                                <div>
+                                    
+                                    <div class="rule-en">2 points on the first try, 1 point on the second try, and 0 after two wrong attempts.</div>
+                                </div>
+                            </div>
+                            <div class="rule-item">
+                                <div class="rule-icon">🔊</div>
+                                <div>
+                                    
+                                    <div class="rule-en">The game includes music and voice feedback. Please turn on the sound.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="login-column" aria-labelledby="login-title">
+                        <h2 id="login-title">👤 Student Login</h2>
+                        <div class="login-panel">
+                            <div class="login-grid">
+                                <div class="login-field full">
+                                    <label for="student-name">Name</label>
+                                    <input id="student-name" maxlength="30" autocomplete="off" placeholder="Enter your name">
+                                </div>
+                                <div class="login-field">
+                                    <label for="student-class">Class</label>
+                                    <select id="student-class">
+                                        <option value="">Select class</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div id="cloud-status" aria-live="polite">Enter your name and class to continue or start a new game.</div>
+                            <div class="login-actions">
+                                <button class="btn" onclick="loadAndContinue()"><span style="font-size:13px;font-weight:normal;">Continue Saved Game</span></button>
+                                <button class="btn btn-yellow" onclick="startNewGame()"><span style="font-size:13px;font-weight:normal;">Start New Game</span></button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+
+        <!-- 消息弹窗 (反馈) -->
+        <div id="message-screen" class="overlay-screen hidden" style="background: rgba(0,0,0,0.85);">
+            <div class="feedback-card">
+                <img id="feedback-banner" src="assets/effects/fx_correct.png" alt="Feedback">
+                <h1 id="msg-title">Feedback</h1>
+                <p id="msg-desc" style="font-size: 24px; color: #ecf0f1;">Message</p>
+                <div id="passenger-dialogue" style="background: #fff3cd; color: #856404; padding: 20px; border-radius: 10px; margin-top: 20px; font-style: italic; font-size: 22px; border-left: 5px solid #ffc107; max-width: 600px;">
+                    "Passenger feedback"
+                </div>
+                
+                <button class="btn image-action-btn continue-art" id="msg-btn" onclick="closeMessage()" aria-label="Continue driving">Continue driving</button>
+            </div>
+        </div>
+
+        <!-- 结束界面 -->
+        <div id="end-screen" class="overlay-screen hidden">
+            <!-- 烟花容器 -->
+            <div id="fireworks-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none;"></div>
+            
+            <!-- Message容器 -->
+            <div class="end-content">
+                <div class="end-finish-banner">Destination reached!</div>
+                <div class="end-summary">
+                    <p id="final-score">Final score: 0/24</p>
+                    <p id="end-comment" style="font-size: 22px; max-width: 800px;">Passenger: Thanks for the ride! Five stars!<br>You got us here on time!</p>
+                </div>
+                <img class="end-trophy" src="assets/ui/ui_trophy.png" alt="Trophy">
+                <section id="leaderboard-panel" class="leaderboard-panel" aria-live="polite">
+                    <h2 class="leaderboard-title"><img src="assets/ui/ui_trophy.png" alt="">Reading Taxi leaderboard</h2>
+                    <div id="final-submit-status" class="leaderboard-status">Preparing results…</div>
+                    <div class="leaderboard-table-wrap">
+                        <table class="leaderboard-table">
+                            <thead><tr><th>Rank</th><th>Name</th><th>Class</th><th>Score</th><th>First-try accuracy</th><th>Time</th><th>Collisions</th></tr></thead>
+                            <tbody id="leaderboard-body"><tr><td colspan="7">Rankings appear after your score is submitted.</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div id="current-rank-card" class="current-rank-card hidden"></div>
+                    <button id="retry-final-submit" class="btn btn-yellow retry-submit-btn hidden" onclick="submitFinalResult()">Resubmit score</button>
+                </section>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
+                    <button class="btn" onclick="resetSavedProgressAndReload()">Restart quiz</button>
+                    <button class="btn btn-yellow" onclick="location.reload()">Back to sign-in</button>
+                    <button class="btn btn-red" onclick="window.close()">End shift</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+
+/**
+ * Google Spreadsheet / Apps Script 数据库设置
+ * 部署 Code.gs 为 Web App 后，把 /exec 网址粘贴到这里。
+ */
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzo7zRv51-Z9E-qRmfxfcJ5RFWeuR7OXpZ4IKA3XXHRbAAWUTwPmjJCWOk22d0Q08M6/exec";
+const GAME_ID = "fun-reading-taxi-en-12-v1";
+const GAME_TITLE = "Fun Reading Quiz";
+const CLASS_OPTIONS = ["C1","C2","C3","C4","C5","C6","C7"];
+
+let studentName = "";
+let studentClass = "";
+let studentKey = "";
+let sessionId = "";
+let gameStartedAt = "";
+let answerHistory = [];
+let crashCount = 0;
+let saveInFlight = false;
+let pendingSave = false;
+let lastSavedAt = "";
+let finalResultSubmitting = false;
+let finalResultSubmitted = false;
+let finalDurationSeconds = 0;
+let questionStartedAt = 0;
+let currentQuestionAttempt = 1;
+let firstAttemptCorrectCount = 0;
+let secondAttemptCorrectCount = 0;
+let missedQuestionCount = 0;
+const MAX_SCORE = 24;
+
+function populateClassOptions() {
+    const select = document.getElementById("student-class");
+    CLASS_OPTIONS.forEach(cls => {
+        const option = document.createElement("option");
+        option.value = cls;
+        option.textContent = cls;
+        select.appendChild(option);
+    });
+}
+populateClassOptions();
+
+function cleanText(value, maxLength = 40) {
+    return String(value || "").replace(/[<>]/g, "").trim().slice(0, maxLength);
+}
+
+function collectIdentity() {
+    studentName = cleanText(document.getElementById("student-name").value, 30);
+    studentClass = cleanText(document.getElementById("student-class").value, 20);
+
+    if (!studentName || !CLASS_OPTIONS.includes(studentClass)) {
+        setCloudStatus("Enter your name and choose your class.", true);
+        return false;
+    }
+    // 云端内部识别键: Class + 规范化Name；不会显示在排行榜上。
+    studentKey = `${GAME_ID}|${studentClass}|${studentName.toLowerCase().replace(/\s+/g, "")}`;
+    return true;
+}
+
+function setCloudStatus(message, isError = false) {
+    const el = document.getElementById("cloud-status");
+    if (el) {
+        el.textContent = message;
+        el.style.color = isError ? "#ffb3b3" : "#f9e79f";
+    }
+}
+
+function updatePlayerBadge() {
+    const badge = document.getElementById("player-badge");
+    badge.textContent = `👤 ${studentName}(${studentClass})`;
+    badge.style.display = "block";
+}
+
+function setSaveIndicator(message, state = "normal") {
+    const el = document.getElementById("save-indicator");
+    el.style.display = "block";
+    el.textContent = message;
+    el.style.background = state === "error" ? "rgba(192,57,43,.88)" :
+                          state === "success" ? "rgba(39,174,96,.88)" :
+                          "rgba(0,0,0,.65)";
+}
+
+function makeSessionId() {
+    return `${GAME_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function localStorageKey() {
+    return `gameProgress:${GAME_ID}:${studentKey}`;
+}
+
+function buildProgressPayload(status = "in_progress") {
+    return {
+        action: "saveProgress",
+        gameId: GAME_ID,
+        gameTitle: GAME_TITLE,
+        studentKey,
+        studentName,
+        studentClass,
+        sessionId,
+        status,
+        startedAt: gameStartedAt,
+        progress: {
+            currentQuestionIndex,
+            score,
+            gameTime,
+            baseSpeed,
+            crashCount,
+            answerHistory,
+            currentQuestionAttempt,
+            firstAttemptCorrectCount,
+            secondAttemptCorrectCount,
+            missedQuestionCount,
+            updatedAt: new Date().toISOString()
+        }
+    };
+}
+
+function saveLocalProgress(status = "in_progress") {
+    try {
+        localStorage.setItem(localStorageKey(), JSON.stringify(buildProgressPayload(status)));
+    } catch (err) {
+        console.warn("Local save failed:", err);
+    }
+}
+
+async function postToDatabase(payload) {
+    if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("PASTE_GOOGLE")) {
+        throw new Error("Missing scoreboard URL");
+    }
+    const response = await fetch(GOOGLE_SCRIPT_URL, {
+        method: "POST",
+        headers: {"Content-Type": "text/plain;charset=utf-8"},
+        body: JSON.stringify(payload)
+    });
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch (_) { throw new Error("Invalid server response"); }
+    if (!data.success) throw new Error(data.message || "Database request failed");
+    return data;
+}
+
+async function saveProgress(status = "in_progress") {
+    saveLocalProgress(status);
+
+    if (saveInFlight) {
+        pendingSave = true;
+        return;
+    }
+    saveInFlight = true;
+    setSaveIndicator("☁ Saving…");
+
+    try {
+        await postToDatabase(buildProgressPayload(status));
+        lastSavedAt = new Date().toISOString();
+        setSaveIndicator("✓ Progress saved", "success");
+    } catch (err) {
+        console.warn(err);
+        setSaveIndicator("⚠ Saved on this device only", "error");
+    } finally {
+        saveInFlight = false;
+        if (pendingSave) {
+            pendingSave = false;
+            saveProgress(status);
+        }
+    }
+}
+
+async function loadAndContinue() {
+    if (!collectIdentity()) return;
+    setCloudStatus("Loading progress…");
+    try {
+        const data = await postToDatabase({
+            action: "loadProgress",
+            gameId: GAME_ID,
+            studentKey,
+            studentName,
+            studentClass,
+            });
+        if (data.found && data.progress) {
+            beginWithProgress(data);
+            return;
+        }
+        const local = loadLocalProgress();
+        if (local) {
+            beginWithProgress({found: true, progress: local.progress, sessionId: local.sessionId, source: "local"});
+            return;
+        }
+        setCloudStatus("No saved game found. Starting a new ride.");
+        setTimeout(startNewGame, 500);
+    } catch (err) {
+        console.warn(err);
+        const local = loadLocalProgress();
+        if (local) {
+            setCloudStatus("Offline: continuing from this device.");
+            beginWithProgress({found: true, progress: local.progress, sessionId: local.sessionId, source: "local"});
+        } else {
+            setCloudStatus(`Could not load progress: ${err.message}`, true);
+        }
+    }
+}
+
+function loadLocalProgress() {
+    try {
+        const raw = localStorage.getItem(localStorageKey());
+        return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+        return null;
+    }
+}
+
+function beginWithProgress(data) {
+    const p = data.progress || {};
+    sessionId = data.sessionId || makeSessionId();
+    currentQuestionIndex = Math.max(0, Math.min(questions.length - 1, Number(p.currentQuestionIndex) || 0));
+    score = Math.max(0, Number(p.score) || 0);
+    gameTime = Math.max(1, Number(p.gameTime) || 60);
+    baseSpeed = Math.max(5, Number(p.baseSpeed) || 5);
+    crashCount = Math.max(0, Number(p.crashCount) || 0);
+    answerHistory = Array.isArray(p.answerHistory) ? p.answerHistory : [];
+    currentQuestionAttempt = Math.max(1, Math.min(2, Number(p.currentQuestionAttempt) || 1));
+    firstAttemptCorrectCount = Math.max(0, Number(p.firstAttemptCorrectCount) || 0);
+    secondAttemptCorrectCount = Math.max(0, Number(p.secondAttemptCorrectCount) || 0);
+    missedQuestionCount = Math.max(0, Number(p.missedQuestionCount) || 0);
+    gameStartedAt = data.startedAt || p.startedAt || new Date().toISOString();
+
+    SoundManager.init();
+    SoundManager.startBGM();
+    document.getElementById("start-screen").classList.add("hidden");
+    updatePlayerBadge();
+    currentState = GameState.DRIVING;
+    speed = baseSpeed;
+    carX = 0.5;
+    obstacles = [];
+    obstaclesSpawnedInLevel = 0;
+    distToNextQuestion = 1200;
+    updateScore();
+    document.getElementById("time-display").innerText = gameTime;
+    lastTime = Date.now();
+    gameLoop();
+    startTimer();
+    setSaveIndicator(data.source === "local" ? "✓ Local progress loaded" : "✓ Cloud progress loaded", "success");
+}
+
+function startNewGame() {
+    if (!collectIdentity()) return;
+    sessionId = makeSessionId();
+    gameStartedAt = new Date().toISOString();
+    answerHistory = [];
+    crashCount = 0;
+    currentQuestionAttempt = 1;
+    firstAttemptCorrectCount = 0;
+    secondAttemptCorrectCount = 0;
+    missedQuestionCount = 0;
+    updatePlayerBadge();
+    initAudioAndStart();
+}
+
+async function resetSavedProgressAndReload() {
+    try {
+        if (studentKey) localStorage.removeItem(localStorageKey());
+        if (studentKey && !GOOGLE_SCRIPT_URL.includes("PASTE_GOOGLE")) {
+            await postToDatabase({
+                action: "resetProgress",
+                gameId: GAME_ID,
+                studentKey,
+                });
+        }
+    } catch (err) {
+        console.warn(err);
+    }
+    location.reload();
+}
+
+/**
+ * 音频与语音管理模块 (SoundManager)
+ */
+const SoundManager = {
+    ctx: null,
+    voices: [],
+    bgmNodes: [], 
+    isPlayingBGM: false,
+    bgmTimer: null,
+    bgmAudio: null,
+    bgmDefaultVolume: 0.28,
+    speechTimer: null,
+    speechWatchdog: null,
+    currentUtterance: null,
+    speechRunId: 0,
+    speechWarmupDone: false,
+    lastSpeechText: "",
+    lastSpeechMood: "normal",
+
+    // 初始化音频上下文
+    init: function() {
+        if (!this.ctx) {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            this.loadVoices();
+        }
+        if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+        // 载入系统语音，并在“Start game”的用户点击中预热朗读引擎。
+        this.loadVoices();
+        this.warmUpSpeech();
+    },
+
+    loadVoices: function() {
+        if (!window.speechSynthesis) return;
+        this.voices = window.speechSynthesis.getVoices();
+        window.speechSynthesis.onvoiceschanged = () => {
+            this.voices = window.speechSynthesis.getVoices();
+        };
+    },
+
+    warmUpSpeech: function() {
+        const synth = window.speechSynthesis;
+        if (!synth || !window.SpeechSynthesisUtterance || this.speechWarmupDone) return;
+        this.speechWarmupDone = true;
+
+        // 这段极低音量的短语在“Start game”点击时执行，用来解除部分浏览器的自动朗读限制。
+        const warmup = new SpeechSynthesisUtterance("Ready");
+        warmup.lang = 'en-GB';
+        warmup.volume = 0.01;
+        warmup.rate = 1.5;
+        warmup.onerror = () => {};
+        if (synth.paused) synth.resume();
+        synth.speak(warmup);
+    },
+
+    startBGM: function() {
+        if (this.isPlayingBGM) return;
+        if (!this.bgmAudio) {
+            this.bgmAudio = new Audio("assets/audio/background_music.mp3");
+            this.bgmAudio.loop = true;
+            this.bgmAudio.volume = this.bgmDefaultVolume;
+            this.bgmAudio.preload = "auto";
+        }
+        this.isPlayingBGM = true;
+        this.bgmAudio.play().catch(err => {
+            console.warn("背景音乐暂时无法自动播放: ", err);
+            this.isPlayingBGM = false;
+        });
+    },
+
+    stopBGM: function() {
+        this.isPlayingBGM = false;
+        if (this.bgmTimer) {
+            clearTimeout(this.bgmTimer);
+            this.bgmTimer = null;
+        }
+        if (this.bgmAudio) {
+            this.bgmAudio.pause();
+            this.bgmAudio.currentTime = 0;
+        }
+        this.bgmNodes.forEach(node => {
+            try {
+                node.stop(); 
+                node.disconnect();
+            } catch(e) {}
+        });
+        this.bgmNodes = [];
+    },
+
+    scheduleBGMLoop: function() {
+        if (!this.isPlayingBGM) return;
+        const melody = [261.6, 293.7, 329.6, 392.0, 440.0, 392.0, 329.6, 293.7];
+        const noteDuration = 0.5; 
+        const now = this.ctx.currentTime;
+
+        melody.forEach((freq, index) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            
+            osc.type = 'sine'; 
+            osc.frequency.value = freq;
+            
+            gain.gain.setValueAtTime(0, now + index * noteDuration);
+            gain.gain.linearRampToValueAtTime(0.05, now + index * noteDuration + 0.1); 
+            gain.gain.exponentialRampToValueAtTime(0.001, now + (index + 1) * noteDuration);
+            
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            
+            osc.start(now + index * noteDuration);
+            osc.stop(now + (index + 1) * noteDuration);
+            
+            this.bgmNodes.push(osc);
+        });
+
+        const loopDuration = melody.length * noteDuration * 1000;
+        this.bgmTimer = setTimeout(() => {
+            this.bgmNodes = this.bgmNodes.filter(n => n.context.state === 'running'); 
+            this.scheduleBGMLoop();
+        }, loopDuration);
+    },
+
+    playCorrect: function() {
+        if (!this.ctx) return;
+        const t = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(660, t);
+        osc.frequency.setValueAtTime(550, t + 0.2);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.6);
+        osc.start(t);
+        osc.stop(t + 0.6);
+    },
+
+    playWrong: function() {
+        if (!this.ctx) return;
+        const t = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, t);
+        osc.frequency.linearRampToValueAtTime(100, t + 0.3);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.linearRampToValueAtTime(0.01, t + 0.3);
+        osc.start(t);
+        osc.stop(t + 0.3);
+    },
+
+    playCrash: function() {
+        if (!this.ctx) return;
+        const bufferSize = this.ctx.sampleRate * 0.5; 
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 800;
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start();
+    },
+
+    playFireworkSound: function() {
+        if (!this.ctx) return;
+        const t = this.ctx.currentTime;
+        const bufferSize = this.ctx.sampleRate * 1; 
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = Math.random() * 2 - 1;
+        }
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.2, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+        noise.connect(gain);
+        gain.connect(this.ctx.destination);
+        noise.start(t);
+        const osc = this.ctx.createOscillator();
+        const oscGain = this.ctx.createGain();
+        osc.frequency.setValueAtTime(600, t);
+        osc.frequency.exponentialRampToValueAtTime(100, t + 0.3);
+        oscGain.gain.setValueAtTime(0.05, t);
+        oscGain.gain.linearRampToValueAtTime(0, t + 0.3);
+        osc.connect(oscGain);
+        oscGain.connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.3);
+    },
+
+    playFanfare: function() {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const notes = [523.25, 659.25, 783.99, 1046.50]; 
+        notes.forEach((freq, i) => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.type = 'triangle';
+            osc.frequency.value = freq;
+            const startT = now + i * 0.15;
+            gain.gain.setValueAtTime(0, startT);
+            gain.gain.linearRampToValueAtTime(0.2, startT + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.01, startT + 0.8);
+            osc.start(startT);
+            osc.stop(startT + 1);
+        });
+    },
+
+    stopSpeech: function() {
+        this.speechRunId++;
+        if (this.speechTimer !== null) {
+            clearTimeout(this.speechTimer);
+            this.speechTimer = null;
+        }
+        if (this.speechWatchdog !== null) {
+            clearTimeout(this.speechWatchdog);
+            this.speechWatchdog = null;
+        }
+        if (window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+            if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        }
+        this.currentUtterance = null;
+        if (this.bgmAudio && this.isPlayingBGM) {
+            this.bgmAudio.volume = this.bgmDefaultVolume;
+        }
+        this.setSpeechButtonState('ready');
+    },
+
+    setSpeechButtonState: function(state) {
+        const button = document.getElementById('speech-replay-btn');
+        const label = document.getElementById('speech-replay-label');
+        if (!button || !label) return;
+
+        button.classList.toggle('is-speaking', state === 'speaking');
+        button.disabled = state === 'unsupported';
+        if (state === 'preparing') label.innerText = "正在Ready语音…";
+        else if (state === 'speaking') label.innerText = "正在朗读…";
+        else if (state === 'error') label.innerText = "点击朗读";
+        else if (state === 'unsupported') label.innerText = "浏览器不支持朗读";
+        else label.innerText = "重新朗读";
+    },
+
+    getEnglishVoice: function() {
+        const voices = window.speechSynthesis.getVoices();
+        return voices.find(v=>/^en[-_]SG$/i.test(v.lang)) || voices.find(v=>/^en\b/i.test(v.lang)) || null;
+    },
+
+    startSpeechAttempt: function(text, mood, useExplicitVoice) {
+        const synth = window.speechSynthesis;
+        if (!synth || !window.SpeechSynthesisUtterance) {
+            console.warn("当前浏览器不支持文字朗读。");
+            this.setSpeechButtonState('unsupported');
+            return;
+        }
+
+        const runId = ++this.speechRunId;
+        let started = false;
+        const utterance = new SpeechSynthesisUtterance(text);
+        const zhVoice = this.getEnglishVoice();
+        utterance.lang = zhVoice?.lang || 'en-SG';
+        utterance.volume = 1.0;
+        if (useExplicitVoice && zhVoice) utterance.voice = zhVoice;
+
+        if (mood === 'happy') {
+            utterance.pitch = 1.1;
+            utterance.rate = 1.0;
+        } else if (mood === 'angry') {
+            utterance.pitch = 0.92;
+            utterance.rate = 1.04;
+        } else {
+            utterance.pitch = 1.0;
+            utterance.rate = 0.98;
+        }
+
+        const restoreBGM = () => {
+            if (this.currentUtterance === utterance) {
+                this.currentUtterance = null;
+            }
+            if (this.speechWatchdog !== null) {
+                clearTimeout(this.speechWatchdog);
+                this.speechWatchdog = null;
+            }
+            if (this.bgmAudio && this.isPlayingBGM) {
+                this.bgmAudio.volume = this.bgmDefaultVolume;
+            }
+        };
+
+        utterance.onstart = () => {
+            if (runId !== this.speechRunId) return;
+            started = true;
+            if (this.speechWatchdog !== null) {
+                clearTimeout(this.speechWatchdog);
+                this.speechWatchdog = null;
+            }
+            // 只有浏览器真正开始朗读后才降低背景音乐。
+            if (this.bgmAudio && this.isPlayingBGM && !this.bgmAudio.paused) {
+                this.bgmAudio.volume = 0.035;
+            }
+            this.setSpeechButtonState('speaking');
+        };
+        utterance.onend = () => {
+            if (runId !== this.speechRunId) return;
+            restoreBGM();
+            this.setSpeechButtonState('ready');
+        };
+        utterance.onerror = (event) => {
+            if (runId !== this.speechRunId) return;
+            restoreBGM();
+            if (event.error !== 'canceled' && event.error !== 'interrupted') {
+                console.warn("人物语音播放失败: ", event.error);
+                // 指定的系统声音不可Time，再让浏览器根据 en-GB 自动选择一次。
+                if (useExplicitVoice && zhVoice) {
+                    this.speechTimer = setTimeout(() => {
+                        this.speechTimer = null;
+                        this.startSpeechAttempt(text, mood, false);
+                    }, 160);
+                    return;
+                }
+            }
+            this.setSpeechButtonState('error');
+        };
+
+        this.currentUtterance = utterance;
+        this.setSpeechButtonState('preparing');
+        if (synth.paused) synth.resume();
+        synth.speak(utterance);
+
+        // 若浏览器把自动朗读静默拦截，停止等待并提示学生点击实体朗读按钮。
+        this.speechWatchdog = setTimeout(() => {
+            if (runId !== this.speechRunId || started) return;
+            this.speechWatchdog = null;
+            synth.cancel();
+            this.currentUtterance = null;
+            if (this.bgmAudio && this.isPlayingBGM) {
+                this.bgmAudio.volume = this.bgmDefaultVolume;
+            }
+            this.setSpeechButtonState('error');
+        }, 2400);
+    },
+
+    speak: function(text, mood) {
+        const cleanText = String(text || "")
+            .replace(/^乘客\s*[: :]\s*/, "")
+            .trim();
+        if (!cleanText) return;
+
+        this.lastSpeechText = cleanText;
+        this.lastSpeechMood = mood || 'normal';
+
+        const synth = window.speechSynthesis;
+        if (!synth || !window.SpeechSynthesisUtterance) {
+            this.setSpeechButtonState('unsupported');
+            return;
+        }
+
+        // 正常反馈时没有上一段语音，直接播放，不再先 cancel()。
+        if (!synth.speaking && !synth.pending && !this.currentUtterance) {
+            this.startSpeechAttempt(cleanText, this.lastSpeechMood, true);
+            return;
+        }
+
+        // 只有确实仍有旧语音时才先清理，并给浏览器足够时间结束旧队列。
+        this.stopSpeech();
+        this.speechTimer = setTimeout(() => {
+            this.speechTimer = null;
+            this.startSpeechAttempt(cleanText, this.lastSpeechMood, true);
+        }, 260);
+    },
+
+    replayLastSpeech: function() {
+        if (!this.lastSpeechText) return;
+        const text = this.lastSpeechText;
+        const mood = this.lastSpeechMood;
+
+        const synth = window.speechSynthesis;
+        if (!synth || !window.SpeechSynthesisUtterance) {
+            this.setSpeechButtonState('unsupported');
+            return;
+        }
+
+        // 自动朗读被拦截后，实体按钮的点击必须直接触发 speak()，以保留用户操作权限。
+        if (!synth.speaking && !synth.pending && !this.currentUtterance) {
+            this.startSpeechAttempt(text, mood, true);
+            return;
+        }
+
+        this.stopSpeech();
+        this.speechTimer = setTimeout(() => {
+            this.speechTimer = null;
+            this.startSpeechAttempt(text, mood, true);
+        }, 220);
+    }
+};
+
+/**
+ * 游戏配置与全局变量
+ */
+
+/* ===== 游戏图片素材: 视觉层 =====
+   注意: 这里不包含任何 Google Sheet、排行榜、学生身份或成绩逻辑。
+*/
+const GAME_ASSETS = {
+    backgrounds: {
+        cityDay: "assets/backgrounds/bg_city_day.jpg",
+        cityNight: "assets/backgrounds/bg_city_night.jpg",
+        residential: "assets/backgrounds/bg_residential.jpg",
+        countryside: "assets/backgrounds/bg_countryside.jpg",
+        mountain: "assets/backgrounds/bg_mountain.jpg",
+        seaside: "assets/backgrounds/bg_seaside.jpg"
+    },
+    roads: {
+        straight: "assets/roads/road_straight.png",
+        fork: "assets/roads/road_fork.png"
+    },
+    taxi: "assets/vehicles/taxi_back.png",
+    obstacles: [
+        "assets/obstacles/obstacle_cone.png",
+        "assets/obstacles/obstacle_cat.png",
+        "assets/obstacles/obstacle_warning.png",
+        "assets/obstacles/obstacle_rock.png"
+    ],
+    barricade: "assets/obstacles/obstacle_barricade.png"
+};
+
+const ASSET_IMAGES = {};
+(function preloadGameAssets(){
+    const flat = {
+        bg_cityDay: GAME_ASSETS.backgrounds.cityDay,
+        bg_cityNight: GAME_ASSETS.backgrounds.cityNight,
+        bg_residential: GAME_ASSETS.backgrounds.residential,
+        bg_countryside: GAME_ASSETS.backgrounds.countryside,
+        bg_mountain: GAME_ASSETS.backgrounds.mountain,
+        bg_seaside: GAME_ASSETS.backgrounds.seaside,
+        road_straight: GAME_ASSETS.roads.straight,
+        road_fork: GAME_ASSETS.roads.fork,
+        taxi: GAME_ASSETS.taxi,
+        obstacle0: GAME_ASSETS.obstacles[0],
+        obstacle1: GAME_ASSETS.obstacles[1],
+        obstacle2: GAME_ASSETS.obstacles[2],
+        obstacle3: GAME_ASSETS.obstacles[3],
+        barricade: GAME_ASSETS.barricade
+    };
+    Object.entries(flat).forEach(([key, src]) => {
+        const img = new Image();
+        img.src = src;
+        ASSET_IMAGES[key] = img;
+    });
+})();
+
+function getSceneImage() {
+    // 10题形成一趟从白天到夜晚的旅程；只影响背景，不影响题目与计分。
+    const scenes = [
+        "bg_residential", "bg_residential",
+        "bg_cityDay", "bg_cityDay",
+        "bg_seaside", "bg_seaside",
+        "bg_countryside", "bg_mountain",
+        "bg_mountain", "bg_cityNight"
+    ];
+    return ASSET_IMAGES[scenes[Math.min(currentQuestionIndex, scenes.length - 1)]];
+}
+
+function drawCoverImage(ctx, img, x, y, w, h) {
+    if (!img || !img.complete || !img.naturalWidth) return false;
+    const ir = img.naturalWidth / img.naturalHeight;
+    const rr = w / h;
+    let sx=0, sy=0, sw=img.naturalWidth, sh=img.naturalHeight;
+    if (ir > rr) {
+        sw = img.naturalHeight * rr;
+        sx = (img.naturalWidth - sw)/2;
+    } else {
+        sh = img.naturalWidth / rr;
+        sy = (img.naturalHeight - sh)/2;
+    }
+    ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+    return true;
+}
+
+const canvas = document.getElementById('output_canvas');
+const ctx = canvas.getContext('2d');
+const previewCanvas = document.getElementById('video-preview');
+const previewCtx = previewCanvas.getContext('2d');
+const videoElement = document.getElementById('input_video');
+
+const GameState = {
+    MENU: 0,
+    DRIVING: 1,
+    QUESTION: 2,
+    FEEDBACK: 3,
+    GAMEOVER: 4,
+    VICTORY: 5,
+    PAUSED: 6
+};
+
+let currentState = GameState.MENU;
+let score = 0;
+let currentQuestionIndex = 0;
+let gameTime = 60; 
+let lastTime = 0;
+let obstacles = [];
+let roadOffset = 0;
+let speed = 5;
+let baseSpeed = 5; 
+let obstaclesSpawnedInLevel = 0; 
+const QUESTION_OBSTACLE_SAFETY_SECONDS = 4;
+
+let steeringAngle = 0; 
+let handSelection = 0; 
+let selectionTimer = 0; 
+const SELECTION_THRESHOLD_TIME = 5000; 
+
+const questions = [
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "Harry Potter has two closest friends at Hogwarts. What is the name of the actress who famously played Hermione Granger in the movie adaptations?",
+    "l": "Emma Watson",
+    "r": "Emma Stone",
+    "ans": "l",
+    "yes": "She played Hermione across all eight Harry Potter films.",
+    "no": "Think of the actress who played Hermione in all eight films."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "In the legendary Chinese classical novel Journey to the West, which of these colorful characters is part of the main group traveling to the West?",
+    "l": "Pigsy (Zhu Bajie)",
+    "r": "The Bull Demon King",
+    "ans": "l",
+    "yes": "The half-man, half-pig demon accompanies the Monkey King on the pilgrimage.",
+    "no": "The Bull Demon King is a rival, not a member of the pilgrimage."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "What is the absolute favourite food that the robotic cat Doraemon constantly craves and will fall into any trap for?",
+    "l": "Dorayaki (Sweet Red Bean Pancakes)",
+    "r": "Strawberry Mochi",
+    "ans": "l",
+    "yes": "Dorayaki are two small pancakes with a sweet red bean filling.",
+    "no": "Look for the sweet with a red bean filling."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "Fans of Arthur Conan Doyle’s famous detective can actually visit a real-life recreation of Sherlock Holmes's house and museum. In which city is this famous house located?",
+    "l": "London",
+    "r": "Edinburgh",
+    "ans": "l",
+    "yes": "The museum is located at the famous fictional address of 221B Baker Street.",
+    "no": "Think of the city where Baker Street is located."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "Bestselling romance novelist Danielle Steel writes extensively about love and relationships. How many times has she been married in real life?",
+    "l": "3 times",
+    "r": "5 times",
+    "ans": "r",
+    "yes": "Danielle Steel has been married five times.",
+    "no": "Three is too few; Steel married five times."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "Why does the comic strip cat Garfield absolutely hate Mondays when he doesn't even have a job?",
+    "l": "Bad luck always happens to him on Mondays.",
+    "r": "His owner, Jon, refuses to feed him lasagna on Mondays.",
+    "ans": "l",
+    "yes": "In the comic strip, Garfield gets hit by pies, trapped in blinds, or struck by lightning specifically on Mondays.",
+    "no": "It is his Monday mishaps, not Jon’s lasagna menu."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "Which of these famous paranormal books was written by Singaporean author Catherine Lim?",
+    "l": "They Do Return... But Gently Lead Them Back",
+    "r": "True Singapore Ghost Stories",
+    "ans": "l",
+    "yes": "This 1983 release was one of Singapore's very first English-language ghost story collections.",
+    "no": "True Singapore Ghost Stories is Russell Lee’s series."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "\"A rose by any other name would smell as sweet\" is one of the most famous lines in literature. Which Shakespearean play is it found in?",
+    "l": "Romeo and Juliet",
+    "r": "A Midsummer Night's Dream",
+    "ans": "l",
+    "yes": "Juliet says this line to Romeo on her balcony.",
+    "no": "Think of the two lovers whose family names keep them apart."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "The bestselling author of The Da Vinci Code has a highly unusual personal routine to overcome writer's block. What does Dan Brown do whenever he gets stuck on a chapter?",
+    "l": "He hangs upside down using gravity inversion boots.",
+    "r": "He sings Italian opera from his balcony.",
+    "ans": "l",
+    "yes": "He claims that hanging upside down helps him view the plot from a completely different perspective and clears his mind.",
+    "no": "His unusual trick changes his physical viewpoint."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "\"Queen of Crime,\" Agatha Christie, is recognized by the Guinness Book of World Records as the best-selling novelist of all time. How many classic detective novels did she write during her career?",
+    "l": "66",
+    "r": "111",
+    "ans": "l",
+    "yes": "Alongside these 66 mystery novels, she also wrote 14 short story collections and the world's longest-running play, The Mousetrap.",
+    "no": "Count the detective novels, not the short story collections."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "According to The Straits Times Weekly Bestsellers list, which book debuted at No. 1, unseating the long-running hit \"Unease: Life in Singapore Families\"?",
+    "l": "Mind The Gap by Ratna Damayanti Taha",
+    "r": "Creating Three Unique Singapore Laws: An Inside Story by S. Jayakumar",
+    "ans": "r",
+    "yes": "S. Jayakumar’s book took the top spot in the list described here.",
+    "no": "Look for the book about the making of Singapore laws."
+  },
+  {
+    "chapter": "Fun Reading Quiz",
+    "q": "Which bestselling contemporary novel tells the emotional story of a boy named Amir growing up in Kabul, Afghanistan, who is haunted by a tragic incident during a childhood kite-fighting tournament?",
+    "l": "The Kite Runner",
+    "r": "Life of Pi",
+    "ans": "l",
+    "yes": "Written by Khaled Hosseini and published in 2003, it became a massive global bestseller.",
+    "no": "Life of Pi follows a different boy on a voyage at sea."
+  }
+];
+const crashComplaints = [
+    "Aiyoh, driver! My kopi nearly spilled!",
+    "My bag was on the seat. Now it's on my lap!",
+    "Wah, my heart jumped before the taxi did!",
+    "Easy on the wheel. We've got time.",
+    "Steady, can? I'm balancing my breakfast back here.",
+    "Good thing this cup has a lid!",
+    "Driver, my kaya toast just landed butter side down.",
+    "That woke me up. No need for kopi now!",
+    "Alamak! I nearly sent that voice message to my boss.",
+    "I asked for a taxi, not a roller coaster!",
+    "Slow down a bit, lah. The library won't run away.",
+    "Eh, where did my bookmark go?",
+    "My bubble tea got a free shake just now.",
+    "Both hands on the wheel. I'll look after the snacks.",
+    "I was on chapter three. That bump turned the page for me!",
+    "Next one we go round, okay?"
+];
+let crashBag = [], lastCrashLine = '';
+function nextCrashLine() {
+    if (!crashBag.length) {
+        crashBag = crashComplaints.slice();
+        for (let i=crashBag.length-1;i>0;i--) {
+            const j=Math.floor(Math.random()*(i+1));
+            [crashBag[i], crashBag[j]] = [crashBag[j], crashBag[i]];
+        }
+        const end=crashBag.length-1;
+        if (crashBag[end]===lastCrashLine) [crashBag[0],crashBag[end]]=[crashBag[end],crashBag[0]];
+    }
+    return lastCrashLine=crashBag.pop();
+}
+const hands = new Hands({locateFile: (file) => {
+    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+}});
+
+hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+});
+
+hands.onResults(onHandsResults);
+
+const camera = new Camera(videoElement, {
+    onFrame: async () => {
+        await hands.send({image: videoElement});
+    },
+    width: 640,
+    height: 480
+});
+
+function onHandsResults(results) {
+    previewCtx.save();
+    previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    previewCtx.drawImage(results.image, 0, 0, previewCanvas.width, previewCanvas.height);
+    if (results.multiHandLandmarks) {
+        for (const landmarks of results.multiHandLandmarks) {
+            drawConnectors(previewCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+        }
+    }
+    previewCtx.restore();
+
+    if(document.getElementById('loading-msg').style.display !== 'none') {
+        document.getElementById('loading-msg').style.display = 'none';
+        document.getElementById('start-content').classList.remove('hidden');
+    }
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length === 2) {
+        const hand1 = results.multiHandLandmarks[0][9]; 
+        const hand2 = results.multiHandLandmarks[1][9]; 
+        
+        let leftHand, rightHand;
+        if (hand1.x < hand2.x) {
+            leftHand = hand1;
+            rightHand = hand2;
+        } else {
+            leftHand = hand2;
+            rightHand = hand1;
+        }
+
+        const yDiff = leftHand.y - rightHand.y; 
+        const SENSITIVITY = 3.0; 
+        steeringAngle = Math.max(-1, Math.min(1, yDiff * SENSITIVITY));
+
+    } else {
+        steeringAngle *= 0.9;
+    }
+
+    const wheel = document.getElementById('steering-indicator');
+    wheel.style.transform = `translateX(-50%) rotate(${steeringAngle * 90}deg)`;
+}
+
+let cameraStarted = false;
+
+function enterSetupScreen() {
+    document.getElementById('landing-screen').style.display = 'none';
+    if (!cameraStarted) {
+        cameraStarted = true;
+        Promise.resolve(camera.start()).catch(err => {
+            cameraStarted = false;
+            console.error("摄像头启动失败: ", err);
+        });
+    }
+}
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    previewCanvas.width = 160;
+    previewCanvas.height = 120;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function initAudioAndStart() {
+    SoundManager.init();
+    SoundManager.startBGM(); 
+    startGame();
+}
+
+function startGame() {
+    document.getElementById('start-screen').classList.add('hidden');
+    updatePlayerBadge();
+    if (!sessionId) sessionId = makeSessionId();
+    if (!gameStartedAt) gameStartedAt = new Date().toISOString();
+    currentState = GameState.DRIVING;
+    score = 0;
+    currentQuestionIndex = 0;
+    currentQuestionAttempt = 1;
+    firstAttemptCorrectCount = 0;
+    secondAttemptCorrectCount = 0;
+    missedQuestionCount = 0;
+    gameTime = 60;
+    baseSpeed = 5;
+    speed = baseSpeed;
+    
+    updateScore();
+    lastTime = Date.now();
+    
+    carX = 0.5;
+    
+    obstacles = [];
+    obstaclesSpawnedInLevel = 0;
+    distToNextQuestion = 7000; 
+    
+    gameLoop();
+    startTimer();
+}
+
+function startTimer() {
+    const timerInterval = setInterval(() => {
+        if(currentState !== GameState.DRIVING && currentState !== GameState.QUESTION) return;
+        
+        gameTime--;
+        document.getElementById('time-display').innerText = gameTime;
+        
+        if(gameTime <= 0) {
+            handleTimeout();
+            clearInterval(timerInterval);
+        }
+        
+        if(currentState === GameState.GAMEOVER || currentState === GameState.VICTORY) {
+            clearInterval(timerInterval);
+        }
+    }, 1000);
+}
+
+function gameLoop() {
+    const now = Date.now();
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
+
+    if(currentState !== GameState.PAUSED && currentState !== GameState.FEEDBACK) {
+        update(dt);
+    }
+    draw(ctx);
+
+    if (currentState !== GameState.GAMEOVER && currentState !== GameState.VICTORY) {
+        requestAnimationFrame(gameLoop);
+    }
+}
+
+let distToNextQuestion = 1000; 
+
+function update(dt) {
+    if (currentState === GameState.DRIVING) {
+        carX += steeringAngle * dt * 0.8;
+        carX = Math.max(0.12, Math.min(0.88, carX)); 
+
+        roadOffset += speed * 100 * dt;
+        distToNextQuestion -= speed * 100 * dt;
+
+        updateObstacles(dt);
+
+        if (distToNextQuestion <= 0 && canSafelyShowQuestion()) {
+            enterQuestionPhase();
+        }
+    } 
+    else if (currentState === GameState.QUESTION) {
+        roadOffset += speed * 50 * dt;
+        
+        let selecting = 0;
+        if (steeringAngle < -0.3) selecting = -1; 
+        else if (steeringAngle > 0.3) selecting = 1; 
+        else selecting = 0;
+
+        if (selecting !== 0 && selecting === handSelection) {
+            selectionTimer += dt * 1000;
+        } else {
+            handSelection = selecting;
+            selectionTimer = 0;
+        }
+
+        updateSelectionUI();
+
+        if (selectionTimer >= SELECTION_THRESHOLD_TIME) {
+            checkAnswer(handSelection === -1 ? 'l' : 'r');
+            // 此处不需再重置 selectionTimer，因为 checkAnswer 会处理
+        }
+    }
+}
+
+function updateObstacles(dt) {
+    obstacles.forEach(obs => {
+        obs.z -= speed * 100 * dt;
+    });
+
+    const carWidth = 0.12;
+    
+    for (let i = 0; i < obstacles.length; i++) {
+        let obs = obstacles[i];
+        
+        if (obs.z < 80 && obs.z > 0 && !obs.hit) {
+            let obsWidth = 0.13;
+            if (Math.abs(carX - obs.x) < (carWidth/2 + obsWidth/2)) {
+                triggerCrash(obs);
+                obs.hit = true; 
+            }
+        }
+    }
+
+    obstacles = obstacles.filter(obs => obs.z > -100);
+
+    const spawnThresholds = [6000, 5000, 4000, 3000, 2000, 1000]; 
+    
+    if (distToNextQuestion > 200 && obstaclesSpawnedInLevel < spawnThresholds.length) {
+        let targetZ = spawnThresholds[obstaclesSpawnedInLevel];
+        
+        if (distToNextQuestion <= targetZ) {
+             if (obstacles.length === 0 || obstacles[obstacles.length-1].z < targetZ - 800) {
+                 spawnObstacle(3500); 
+                 obstaclesSpawnedInLevel++;
+             }
+        }
+    }
+}
+
+function canSafelyShowQuestion() {
+    const approaching = obstacles.filter(obs => !obs.hit && obs.z > 0);
+    if (approaching.length === 0) return true;
+
+    const nearestObstacleZ = Math.min(...approaching.map(obs => obs.z));
+    const distancePerSecond = Math.max(1, speed * 100);
+    return nearestObstacleZ / distancePerSecond >= QUESTION_OBSTACLE_SAFETY_SECONDS;
+}
+
+function spawnObstacle(zDist) {
+    const rand = Math.random();
+    let laneBase;
+    
+    if (rand < 0.33) {
+        laneBase = 0.18; 
+    } else if (rand < 0.66) {
+        laneBase = 0.5;  
+    } else {
+        laneBase = 0.82; 
+    }
+    
+    const types = [0, 1, 2, 3]; 
+    const type = types[Math.floor(Math.random() * types.length)];
+    
+    obstacles.push({
+        x: laneBase, 
+        z: zDist, 
+        type: type,
+        hit: false
+    });
+}
+
+function triggerCrash(obs) {
+    crashCount++;
+    saveProgress("in_progress");
+    SoundManager.playCrash();
+
+    const flash = document.getElementById('crash-flash');
+    flash.style.opacity = 0.5;
+    setTimeout(() => flash.style.opacity = 0, 100);
+
+    const complaint = nextCrashLine();
+    
+    showMessage("💥 Collision!", "You hit an obstacle.", complaint, false, true);
+    
+    speed = 2; 
+    setTimeout(() => { if(currentState === GameState.DRIVING) speed = baseSpeed; }, 2000);
+}
+
+function enterQuestionPhase() {
+    currentState = GameState.QUESTION;
+    questionStartedAt = Date.now();
+    speed = baseSpeed * 0.5; 
+    
+    const qData = questions[currentQuestionIndex];
+    const attemptLabel = currentQuestionAttempt === 1 ? "First Try" : "Second Chance";
+    document.getElementById('question-text').innerText = `Q${currentQuestionIndex+1}/12 · ${attemptLabel}: ${qData.q}`;
+    document.getElementById('text-left').innerText = qData.l;
+    document.getElementById('text-right').innerText = qData.r;
+    
+    document.getElementById('question-panel').style.display = 'block';
+    
+    document.getElementById('opt-left').style.transform = "scale(1)";
+    document.getElementById('opt-right').style.transform = "scale(1)";
+}
+
+function updateSelectionUI() {
+    const barContainer = document.getElementById('selection-bar-container');
+    const barFill = document.getElementById('selection-bar-fill');
+    const text = document.getElementById('selection-text');
+    const optLeft = document.getElementById('opt-left');
+    const optRight = document.getElementById('opt-right');
+
+    if (handSelection !== 0) {
+        barContainer.style.display = 'block';
+        text.style.display = 'block';
+        const pct = Math.min(100, (selectionTimer / SELECTION_THRESHOLD_TIME) * 100);
+        barFill.style.width = `${pct}%`;
+
+        if(handSelection === -1) {
+            optLeft.style.transform = "scale(1.03)";
+            optLeft.style.boxShadow = "0 0 15px yellow";
+            optRight.style.transform = "scale(1)";
+            optRight.style.boxShadow = "none";
+        } else {
+            optRight.style.transform = "scale(1.03)";
+            optRight.style.boxShadow = "0 0 15px yellow";
+            optLeft.style.transform = "scale(1)";
+            optLeft.style.boxShadow = "none";
+        }
+    } else {
+        barContainer.style.display = 'none';
+        text.style.display = 'none';
+        optLeft.style.transform = "scale(1)";
+        optRight.style.transform = "scale(1)";
+        optLeft.style.boxShadow = "none";
+        optRight.style.boxShadow = "none";
+    }
+}
+
+function checkAnswer(userChoice) {
+    const qData = questions[currentQuestionIndex];
+    const attemptNumber = currentQuestionAttempt;
+
+    handSelection = 0;
+    selectionTimer = 0;
+    updateSelectionUI();
+
+    document.getElementById('question-panel').style.display = 'none';
+    document.getElementById('selection-bar-container').style.display = 'none';
+    document.getElementById('selection-text').style.display = 'none';
+
+    const wasCorrect = userChoice === qData.ans;
+    const isFinalAttempt = wasCorrect || attemptNumber >= 2;
+    const attemptScore = wasCorrect ? (attemptNumber === 1 ? 2 : 1) : 0;
+
+    answerHistory.push({
+        questionId: `book-q${currentQuestionIndex + 1}`,
+        questionOrder: currentQuestionIndex + 1,
+        chapter: qData.chapter || "",
+        questionText: qData.q,
+        attemptNumber,
+        userChoice,
+        userAnswerText: userChoice === "l" ? qData.l : qData.r,
+        correctChoice: qData.ans,
+        correctAnswerText: qData.ans === "l" ? qData.l : qData.r,
+        isCorrect: wasCorrect,
+        attemptScore,
+        isFinalAttempt,
+        questionDurationSeconds: questionStartedAt ? Math.max(0, Math.round((Date.now() - questionStartedAt) / 1000)) : 0,
+        answeredAt: new Date().toISOString()
+    });
+
+    if (wasCorrect) {
+        score += attemptScore;
+        if (attemptNumber === 1) firstAttemptCorrectCount++;
+        else secondAttemptCorrectCount++;
+        updateScore();
+        baseSpeed += 1;
+        speed = baseSpeed;
+        SoundManager.playCorrect();
+
+        const praise = qData.yes;
+        const title = attemptNumber === 1 ? "🌟 First try! +2 points" : "⭐ Second try! +1 point";
+        const desc = attemptNumber === 1
+            ? "Two points for getting it on your first try."
+            : "One point for getting it on your second try.";
+        showMessage(title, desc, praise, true, false, true);
+        return;
+    }
+
+    SoundManager.playWrong();
+    if (attemptNumber === 1) {
+        currentQuestionAttempt = 2;
+        const reason = {dialog:qData.no};
+        showMessage(
+            "🔄 Not quite",
+            "You keep your score. Use the clue and try once more for one point.",
+            reason.dialog,
+            false,
+            false,
+            false
+        );
+    } else {
+        missedQuestionCount++;
+        const correctText = qData.ans === "l" ? qData.l : qData.r;
+        showMessage(
+            "📘 No points this time",
+            `Correct answer: ${correctText}`,
+            qData.yes,
+            false,
+            false,
+            true
+        );
+    }
+}
+
+function showMessage(title, desc, dialog, isCorrect, isCrash = false, advanceAfterFeedback = false) {
+    currentState = GameState.FEEDBACK;
+
+    const screen = document.getElementById('message-screen');
+    const btn = document.getElementById('msg-btn');
+    const titleEl = document.getElementById('msg-title');
+    const feedbackBanner = document.getElementById('feedback-banner');
+    const feedbackCard = screen.querySelector('.feedback-card');
+
+    titleEl.innerText = title.replace(/^[^\p{L}\p{N}]+/u, '');
+    titleEl.style.color = isCorrect ? '#2ecc71' : (isCrash ? '#f39c12' : '#e74c3c');
+    document.getElementById('msg-desc').innerText = desc;
+    document.getElementById('passenger-dialogue').innerText = dialog;
+    feedbackBanner.src = isCorrect ? "assets/effects/fx_correct.png" : "assets/effects/fx_wrong.png";
+    feedbackCard.classList.remove('status-correct', 'status-wrong', 'status-crash');
+    feedbackCard.classList.add(isCrash ? 'status-crash' : (isCorrect ? 'status-correct' : 'status-wrong'));
+    let speechMood = 'angry';
+
+    if (isCrash) {
+        btn.classList.add('btn-yellow');
+        btn.classList.remove('retry-art');
+        btn.classList.add('continue-art');
+        btn.innerText = "Back to the road";
+        btn.setAttribute('aria-label', 'Continue driving');
+    } else if (advanceAfterFeedback) {
+        btn.classList.remove('btn-yellow');
+        btn.classList.remove('retry-art');
+        btn.classList.add('continue-art');
+        btn.innerText = "Continue";
+        btn.setAttribute('aria-label', 'Continue');
+        speechMood = isCorrect ? 'happy' : 'normal';
+    } else {
+        btn.classList.add('btn-yellow');
+        btn.classList.remove('continue-art');
+        btn.classList.add('retry-art');
+        btn.innerText = "Try again";
+        btn.setAttribute('aria-label', 'Try again');
+    }
+
+    screen.classList.remove('hidden');
+    const pick = lines => lines[Math.floor(Math.random() * lines.length)];
+    const spoken = isCrash
+        ? dialog
+        : (isCorrect
+            ? (currentQuestionIndex === 0 ? "Wah, you know your Harry Potter! Emma Watson played Hermione in all eight films." : pick(["Wah, you know this one! ", "Steady, driver! ", "That's the one! "]) + dialog)
+            : (advanceAfterFeedback ? "Never mind, next stop we try again. " : "Not quite, leh. ") + dialog);
+    SoundManager.speak(spoken, speechMood);
+
+    btn.onclick = () => {
+        screen.classList.add('hidden');
+        SoundManager.stopSpeech();
+
+        if (isCrash) {
+            currentState = GameState.DRIVING;
+            speed = baseSpeed;
+            lastTime = Date.now();
+        } else if (advanceAfterFeedback) {
+            nextLevel();
+        } else {
+            resetForRetry();
+        }
+    };
+}
+
+function nextLevel() {
+    currentQuestionIndex++;
+    currentQuestionAttempt = 1;
+    saveProgress(currentQuestionIndex >= questions.length ? "completed" : "in_progress");
+    if (currentQuestionIndex >= questions.length) {
+        victory();
+    } else {
+        currentState = GameState.DRIVING;
+        distToNextQuestion = 7000;
+        obstaclesSpawnedInLevel = 0;
+        gameTime = 60;
+        document.getElementById('time-display').innerText = gameTime;
+        lastTime = Date.now();
+    }
+}
+
+function resetForRetry() {
+    saveProgress("in_progress");
+    currentState = GameState.DRIVING;
+    distToNextQuestion = 500;
+    lastTime = Date.now();
+}
+
+function handleTimeout() {
+    currentState = GameState.GAMEOVER;
+    saveProgress("timed_out");
+    SoundManager.stopBGM();
+    SoundManager.playWrong();
+    
+    const screen = document.getElementById('message-screen');
+    document.getElementById('msg-title').innerText = "Time is up!";
+    document.getElementById('feedback-banner').src = "assets/effects/fx_wrong.png";
+    const feedbackCard = screen.querySelector('.feedback-card');
+    feedbackCard.classList.remove('status-correct', 'status-crash');
+    feedbackCard.classList.add('status-wrong');
+    document.getElementById('msg-title').style.color = '#e74c3c';
+    document.getElementById('msg-desc').innerText = "You ran out of time on this stretch.";
+    const text = "Passenger: Driver, we are late...";
+    document.getElementById('passenger-dialogue').innerText = text;
+    
+    SoundManager.speak("Aiyah, we're late already! Next ride we'll make it.", 'angry');
+    
+    const btn = document.getElementById('msg-btn');
+    btn.innerText = "Start another ride";
+    btn.classList.remove('continue-art');
+    btn.classList.add('retry-art');
+    btn.setAttribute('aria-label', 'Start another ride');
+    btn.classList.add('btn-red');
+    btn.onclick = () => location.reload();
+    
+    screen.classList.remove('hidden');
+}
+
+
+function formatDuration(totalSeconds) {
+    const seconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${String(secs).padStart(2, "0")}s`;
+}
+
+function renderLeaderboard(data) {
+    const body = document.getElementById("leaderboard-body");
+    const rankCard = document.getElementById("current-rank-card");
+    const rows = Array.isArray(data.leaderboard) ? data.leaderboard : [];
+    body.innerHTML = "";
+
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="7">No scores yet.</td></tr>';
+    } else {
+        rows.forEach(item => {
+            const tr = document.createElement("tr");
+            if (String(item.studentKey || "").toLowerCase() === studentKey.toLowerCase()) {
+                tr.classList.add("current-player");
+            }
+            const accuracy = Math.round((Number(item.accuracy) || 0) * 100);
+            const cells = [
+                item.rank,
+                item.name,
+                item.className,
+                `${item.score}/${item.totalScore || MAX_SCORE}`,
+                `${accuracy}%`,
+                formatDuration(item.durationSeconds),
+                Number(item.collisionCount) || 0
+            ];
+            cells.forEach(value => {
+                const td = document.createElement("td");
+                td.textContent = value;
+                tr.appendChild(td);
+            });
+            body.appendChild(tr);
+        });
+    }
+
+    const best = data.currentStudentBest;
+    if (best && data.currentStudentRank) {
+        rankCard.classList.remove("hidden");
+        rankCard.textContent = `Your rank: ${data.currentStudentRank}  · ${best.name}(${best.className}) · Best score ${best.score}/${best.totalScore || MAX_SCORE} · First-try accuracy ${Math.round((Number(best.accuracy) || 0) * 100)}% · Time ${formatDuration(best.durationSeconds)} · Collisions ${best.collisionCount || 0}  · attempt ${best.attemptCount || 1}`;
+    } else {
+        rankCard.classList.add("hidden");
+    }
+}
+
+async function submitFinalResult() {
+    if (finalResultSubmitting) return;
+    const statusEl = document.getElementById("final-submit-status");
+    const retryBtn = document.getElementById("retry-final-submit");
+    finalResultSubmitting = true;
+    retryBtn.classList.add("hidden");
+    statusEl.textContent = "☁ Saving score and loading leaderboard…";
+    statusEl.style.color = "#805b00";
+
+    const startMs = Date.parse(gameStartedAt || "");
+    finalDurationSeconds = Number.isFinite(startMs) ? Math.max(0, Math.round((Date.now() - startMs) / 1000)) : 0;
+
+    try {
+        const data = await postToDatabase({
+            action: "submitFinalResult",
+            gameId: GAME_ID,
+            gameTitle: GAME_TITLE,
+            sessionId,
+            studentKey,
+            studentName,
+            studentClass,
+                    score,
+            totalQuestions: questions.length,
+            totalScore: MAX_SCORE,
+            accuracy: questions.length ? firstAttemptCorrectCount / questions.length : 0,
+            firstAttemptCorrectCount,
+            secondAttemptCorrectCount,
+            missedQuestionCount,
+            durationSeconds: finalDurationSeconds,
+            collisionCount: crashCount,
+            completed: true,
+            completedAt: new Date().toISOString(),
+            responses: answerHistory
+        });
+        finalResultSubmitted = true;
+        if (data.isNewPersonalBest) {
+            statusEl.textContent = `🎉 New Personal Best!New best: ${score}/${MAX_SCORE}(attempt ${data.attemptCount || 1} )`;
+        } else {
+            statusEl.textContent = data.duplicate
+                ? "✓ Score recorded"
+                : `✓ Score recorded · Attempt  ${data.attemptCount || 1} `;
+        }
+        statusEl.style.color = "#1d7a46";
+        renderLeaderboard(data);
+    } catch (err) {
+        console.warn("Final result submission failed:", err);
+        statusEl.textContent = `⚠ Score upload failed: ${err.message}`;
+        statusEl.style.color = "#b42318";
+        retryBtn.classList.remove("hidden");
+        document.getElementById("leaderboard-body").innerHTML = '<tr><td colspan="7">Leaderboard unavailable. Please try again.</td></tr>';
+    } finally {
+        finalResultSubmitting = false;
+    }
+}
+
+function victory() {
+    currentState = GameState.VICTORY;
+    saveProgress("completed");
+    SoundManager.stopBGM();
+    SoundManager.playFanfare(); 
+    
+    // 朗读包含“五星好评”的最终语音
+    SoundManager.speak("Made it on time! Five stars for you, can or not? Of course can!", 'happy');
+
+    const screen = document.getElementById('end-screen');
+    const startMs = Date.parse(gameStartedAt || "");
+    finalDurationSeconds = Number.isFinite(startMs) ? Math.max(0, Math.round((Date.now() - startMs) / 1000)) : 0;
+    document.getElementById('final-score').innerText = `Final score: ${score} / ${MAX_SCORE} · First try: ${firstAttemptCorrectCount} · Second try: ${secondAttemptCorrectCount} · Missed: ${missedQuestionCount} · Driver: ${studentName}(${studentClass}) · Time: ${formatDuration(finalDurationSeconds)}`;
+    screen.classList.remove('hidden');
+    launchFireworks();
+    submitFinalResult();
+}
+
+function updateScore() {
+    document.getElementById('score-display').innerText = `${score}/${MAX_SCORE}`;
+}
+
+/**
+ * 绘图逻辑 (Canvas)
+ */
+function draw(ctx) {
+    const w = canvas.width;
+    const h = canvas.height;
+    const horizon = h * 0.34;
+
+    // 1. 场景背景图片
+    const scene = getSceneImage();
+    if (!drawCoverImage(ctx, scene, 0, 0, w, h)) {
+        ctx.fillStyle = "#87CEEB";
+        ctx.fillRect(0, 0, w, h);
+    }
+
+    // 2. 全程统一使用直线路，答题时不再突然切换为分叉道路。
+    const roadImg = ASSET_IMAGES.road_straight;
+    if (roadImg && roadImg.complete && roadImg.naturalWidth) {
+        const roadH = h - horizon + 25;
+        const roadW = w * 1.08;
+        ctx.save();
+        ctx.globalAlpha = 0.98;
+        ctx.drawImage(roadImg, w/2-roadW/2, horizon-12, roadW, roadH);
+        ctx.restore();
+    } else {
+        // 图片未加载完成时保留原本可玩的道路，不会出现空白。
+        const roadTopWidth = w * 0.14;
+        const roadBottomWidth = w * 0.96;
+        ctx.fillStyle = "#555";
+        ctx.beginPath();
+        ctx.moveTo(w/2-roadTopWidth, horizon);
+        ctx.lineTo(w/2-roadBottomWidth/2, h);
+        ctx.lineTo(w/2+roadBottomWidth/2, h);
+        ctx.lineTo(w/2+roadTopWidth, horizon);
+        ctx.fill();
+    }
+
+    // 3. 路边树木随道路向后移动，提供持续的行驶速度参照。
+    drawRoadsideTrees(ctx, w, h, horizon);
+
+    // 4. 障碍物
+    obstacles.sort((a, b) => b.z - a.z);
+    const roadTopWidth = w * 0.14;
+    const roadBottomWidth = w * 0.96;
+    obstacles.forEach(obs => {
+        const scale = 500 / (500 + obs.z);
+        const drawY = horizon + (h - horizon) * scale;
+        const roadWAtZ = roadTopWidth + (roadBottomWidth - roadTopWidth) * scale;
+        const drawX = w/2 + (obs.x - 0.5) * roadWAtZ;
+        drawObstacle(ctx, drawX, drawY, scale, obs.type);
+    });
+
+    // 5. 玩家德士
+    const carScreenX = w/2 + (carX - 0.5) * roadBottomWidth;
+    const carScreenY = h - 88;
+    drawTaxi(ctx, carScreenX, carScreenY);
+}
+
+function drawRoadsideTrees(ctx, w, h, horizon) {
+    const roadTopWidth = w * 0.14;
+    const roadBottomWidth = w * 0.96;
+    const cycleDistance = 4800;
+    const treeCount = 12;
+
+    for (let i = 0; i < treeCount; i++) {
+        const z = cycleDistance - ((roadOffset + i * (cycleDistance / treeCount)) % cycleDistance);
+        const scale = 500 / (500 + z);
+        const y = horizon + (h - horizon) * scale;
+        const roadWidthHere = roadTopWidth + (roadBottomWidth - roadTopWidth) * scale;
+        const shoulderGap = 18 + 38 * scale;
+        const treeSize = 18 + 92 * scale;
+
+        drawRoadsideTree(ctx, w / 2 - roadWidthHere / 2 - shoulderGap, y, treeSize);
+        drawRoadsideTree(ctx, w / 2 + roadWidthHere / 2 + shoulderGap, y, treeSize);
+    }
+}
+
+function drawRoadsideTree(ctx, x, groundY, size) {
+    ctx.save();
+    ctx.translate(x, groundY);
+
+    ctx.fillStyle = "rgba(0,0,0,.18)";
+    ctx.beginPath();
+    ctx.ellipse(0, 3, size * 0.34, size * 0.10, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#76512f";
+    ctx.fillRect(-size * 0.07, -size * 0.54, size * 0.14, size * 0.55);
+
+    ctx.fillStyle = "#1f8f45";
+    ctx.beginPath();
+    ctx.arc(0, -size * 0.72, size * 0.31, 0, Math.PI * 2);
+    ctx.arc(-size * 0.23, -size * 0.58, size * 0.27, 0, Math.PI * 2);
+    ctx.arc(size * 0.23, -size * 0.58, size * 0.27, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(100,220,105,.55)";
+    ctx.beginPath();
+    ctx.arc(-size * 0.10, -size * 0.78, size * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawTaxi(ctx, x, y) {
+    const img = ASSET_IMAGES.taxi;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(steeringAngle * 0.13);
+    if (img && img.complete && img.naturalWidth) {
+        const targetW = Math.max(105, Math.min(canvas.width * 0.10, 175));
+        const targetH = targetW * img.naturalHeight / img.naturalWidth;
+        ctx.drawImage(img, -targetW/2, -targetH + 35, targetW, targetH);
+    } else {
+        // fallback: 素材未加载时仍显示原始简易德士
+        ctx.fillStyle = "#f1c40f";
+        ctx.beginPath();
+        ctx.roundRect(-40, -20, 80, 50, 10);
+        ctx.fill();
+        ctx.fillStyle = "#34495e";
+        ctx.fillRect(-35, -15, 70, 20);
+    }
+    ctx.restore();
+}
+
+function drawObstacle(ctx, x, y, scale, type) {
+    const img = ASSET_IMAGES["obstacle" + type] || ASSET_IMAGES.obstacle0;
+    ctx.save();
+    ctx.translate(x, y);
+
+    // 阴影让玩家更清楚障碍物所在位置
+    const size = Math.max(42, 210 * scale);
+    ctx.fillStyle = "rgba(0,0,0,.25)";
+    ctx.beginPath();
+    ctx.ellipse(0, 3, size*.30, size*.09, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    if (img && img.complete && img.naturalWidth) {
+        const ratio = img.naturalHeight / img.naturalWidth;
+        let drawW = size;
+        // 警告牌与石头略放大，避免“路障太小”的误解
+        if (type === 2 || type === 3) drawW *= 1.15;
+        const drawH = drawW * ratio;
+        ctx.drawImage(img, -drawW/2, -drawH + 8, drawW, drawH);
+    } else {
+        ctx.fillStyle = "#ff6b00";
+        ctx.beginPath();
+        ctx.moveTo(-20,0); ctx.lineTo(20,0); ctx.lineTo(0,-60); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+}
+
+function launchFireworks() {
+    const container = document.getElementById('fireworks-container');
+    container.innerHTML = ''; 
+    
+    for(let i=0; i<30; i++) {
+        // 播放随机的烟花音效
+        setTimeout(() => {
+            if (i % 3 === 0) SoundManager.playFireworkSound();
+        }, i * 150);
+
+        setTimeout(() => {
+            const el = document.createElement('img');
+            el.src = 'assets/icons/icon_confetti.png';
+            el.alt = '';
+            el.style.position = 'absolute';
+            el.style.left = Math.random() * 90 + 5 + '%'; 
+            el.style.top = Math.random() * 80 + 10 + '%';
+            const particleSize = (Math.random() * 55 + 45) + 'px';
+            el.style.width = particleSize;
+            el.style.height = particleSize;
+            el.style.objectFit = 'contain';
+            el.style.transform = 'scale(0)';
+            el.style.transition = 'transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.8s ease-out';
+            el.style.opacity = '0.6'; 
+            
+            container.appendChild(el);
+            
+            requestAnimationFrame(() => {
+                el.style.transform = `scale(${1.5 + Math.random()}) rotate(${Math.random() * 60 - 30}deg)`;
+                setTimeout(() => { el.style.opacity = '0'; }, 500);
+            });
+        }, i * 150);
+    }
+}
+
+</script>
+</body>
+</html>
+
