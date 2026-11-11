@@ -1266,6 +1266,8 @@
                     </div>
                     <div id="current-rank-card" class="current-rank-card hidden"></div>
                     <button id="retry-final-submit" class="btn btn-yellow retry-submit-btn hidden" onclick="submitFinalResult()">Resubmit score</button>
+                    <button type="button" id="refresh-final" class="btn hidden" style="background:#144b75;color:white;padding:.55em 1em;font-size:1rem" onclick="refreshFinalBoard()">Refresh leaderboard</button>
+                    <div role="status" id="refresh-note" style="color:#153451"></div>
                 </section>
                 <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
                     <button class="btn" onclick="resetSavedProgressAndReload()">Restart quiz</button>
@@ -1401,11 +1403,12 @@ function saveLocalProgress(status = "in_progress") {
     }
 }
 
-async function postToDatabase(payload) {
+async function postToDatabase(payload, signal) {
     if (!GOOGLE_SCRIPT_URL || GOOGLE_SCRIPT_URL.includes("PASTE_GOOGLE")) {
         throw new Error("Missing scoreboard URL");
     }
     const response = await fetch(GOOGLE_SCRIPT_URL, {
+        signal,
         method: "POST",
         headers: {"Content-Type": "text/plain;charset=utf-8"},
         body: JSON.stringify(payload)
@@ -2791,6 +2794,22 @@ function renderLeaderboard(data) {
     }
 }
 
+let recordedRide = null;
+async function refreshFinalBoard() {
+    const btn=document.getElementById("refresh-final"), note=document.getElementById("refresh-note");
+    if (!recordedRide || btn.disabled) return;
+    btn.disabled=true; note.textContent="Refreshing…";
+    const request=new AbortController(), timeout=setTimeout(()=>request.abort(),20000);
+    try {
+        const data=await postToDatabase(JSON.parse(recordedRide),request.signal);
+        if (!Array.isArray(data.leaderboard)) throw Error();
+        renderLeaderboard(data);
+        note.textContent="Updated at "+new Date().toLocaleTimeString();
+    } catch (_) {
+        note.textContent="Could not refresh. Previous rankings are still shown. Try again.";
+    } finally { clearTimeout(timeout); btn.disabled=false; }
+}
+
 async function submitFinalResult() {
     if (finalResultSubmitting) return;
     const statusEl = document.getElementById("final-submit-status");
@@ -2804,7 +2823,7 @@ async function submitFinalResult() {
     finalDurationSeconds = Number.isFinite(startMs) ? Math.max(0, Math.round((Date.now() - startMs) / 1000)) : 0;
 
     try {
-        const data = await postToDatabase({
+        const payload = {
             action: "submitFinalResult",
             gameId: GAME_ID,
             gameTitle: GAME_TITLE,
@@ -2824,7 +2843,11 @@ async function submitFinalResult() {
             completed: true,
             completedAt: new Date().toISOString(),
             responses: answerHistory
-        });
+        };
+        const snapshot=JSON.stringify(payload);
+        const data=await postToDatabase(payload);
+        recordedRide=snapshot;
+        document.getElementById("refresh-final").classList.remove("hidden");
         finalResultSubmitted = true;
         if (data.isNewPersonalBest) {
             statusEl.textContent = `🎉 New Personal Best!New best: ${score}/${MAX_SCORE}(attempt ${data.attemptCount || 1} )`;
